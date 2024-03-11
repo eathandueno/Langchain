@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@langchain/openai": "^0.0.19",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.4.5",
+    "langchain": "^0.1.26"
+  }
+}
