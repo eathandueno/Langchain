@@ -1,0 +1,32 @@
+import React, { useState } from 'react';
+
+function App() {
+  const [question, setQuestion] = useState('');
+  const [result, setResult] = useState(null);
+
+  const handleQuestionChange = (event) => {
+    setQuestion(event.target.value);
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const response = await fetch(`http://localhost:3000/split?question=${encodeURIComponent(question)}`);
+    const data = await response.json();
+    setResult(data);
+  };
+
+  return (
+    <div className="App">
+      <form onSubmit={handleSubmit}>
+        <label>
+          Question:
+          <input type="text" value={question} onChange={handleQuestionChange} />
+        </label>
+        <button type="submit">Submit</button>
+      </form>
+      {result && <pre>{JSON.stringify(result, null, 2)}</pre>}
+    </div>
+  );
+}
+
+export default App;

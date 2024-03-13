@@ -1,29 +1,39 @@
 require('dotenv').config();
 const cheerio = require("cheerio");
+const { Document } = require("langchain/document");
+const {formatDocumentsAsString} = require("langchain/util/document");
 const { CheerioWebBaseLoader } = require("langchain/document_loaders/web/cheerio");
 const { RecursiveCharacterTextSplitter } = require("langchain/text_splitter");
 const { MemoryVectorStore } = require("langchain/vectorstores/memory");
 const { OpenAIEmbeddings, ChatOpenAI } = require("@langchain/openai");
-const { pull } = require("langchain/hub");
-
 const { StringOutputParser } = require("@langchain/core/output_parsers");
-const { ChatPromptTemplate } = require("@langchain/core/prompts");
-
 const { PromptTemplate } = require("@langchain/core/prompts");
 const { createStuffDocumentsChain } = require("langchain/chains/combine_documents");
+const { RunnableSequence, RunnablePassthrough } = require("@langchain/core/runnables");
+const express = require('express');
+const cors = require('cors');
+const mammoth = require('mammoth');
+const app = express();
+app.use(cors()); 
+const port = 3000;
+const multer = require('multer');
+const fs = require('fs');
+const upload = multer({ dest: 'uploads/' });
+const pdfParse = require('pdf-parse');
 
 const template = `Use the following pieces of context to answer the question at the end.
 If you don't know the answer, just say that you don't know, don't try to make up an answer.
-Use three sentences maximum and keep the answer as concise as possible.
-Always say "thanks for asking!" at the end of the answer.
-
+----------------
+Context:
 {context}
 
 Question: {question}
 
 Helpful Answer:`;
 
-const customRagPrompt = PromptTemplate.fromTemplate(template);
+const prompt = PromptTemplate.fromTemplate(template);
+
+
 
 const llm = new ChatOpenAI({ modelName: "gpt-3.5-turbo", temperature: 0 });
 const titleSelector = "title";
@@ -40,38 +50,64 @@ const loader = new CheerioWebBaseLoader(
     }
 );
 
-async function loadAndLog() {
-    const docs = await loader.load();
-    // console.log(docs[0].pageContent);
- 
+
+app.post('/split', upload.single('file'), async (req, res) => {  
+  try {
+    let text;
+    let file = req.file;
+    // let filePath = handleFilePath(req.file.path);
+    let filePath = req.file.path;
+    if (file.mimetype === 'application/pdf') {
+      const dataBuffer = fs.readFileSync(filePath);
+      const data = await pdfParse(dataBuffer);
+      text = data.text;
+    } else if (file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      const result = await mammoth.extractRawText({ path: filePath });
+      text = result.value;
+    } else if (file.mimetype === 'text/plain' || file.mimetype === 'application/msword') {
+      text = fs.readFileSync(filePath, 'utf8');
+    } else {
+      throw new Error(`Unsupported file type: ${file.mimetype}`);
+    }
+
+    
+    // console.log('Text:', text);
     const textSplitter = new RecursiveCharacterTextSplitter({
       chunkSize: 1000,
-      chunkOverlap: 200,
+      chunkOverlap: 250,
     });
-    const allSplits = await textSplitter.splitDocuments(docs);
-
-    const vectorStore = await MemoryVectorStore.fromDocuments(
-      allSplits,
-      new OpenAIEmbeddings({
-        openAIApiKey:process.env.OPENAI_API_KEY,
-        
-        }),
-    );
-    const retriever = vectorStore.asRetriever({ k: 6, searchType: "similarity" });
+    let splits = text.split('\n').filter(str => str.trim() !== '').map(str => ({ content: str })); // or use the appropriate delimiter
+    
+    splits = await textSplitter.createDocuments([text]);
+    
+    const vectorStore = await MemoryVectorStore.fromDocuments(splits, new OpenAIEmbeddings());
+    const retriever = vectorStore.asRetriever();
+    
     const ragChain = await createStuffDocumentsChain({
-        llm,
-        prompt: customRagPrompt,
-        outputParser: new StringOutputParser(),
-      });
-      const context = await retriever.getRelevantDocuments(
-        "what is task decomposition"
-      );
-      
-      await ragChain.invoke({
-        question: "What is Task Decomposition?",
-        context,
-      });
-      console.log(context);
-}
- 
- loadAndLog();
+      llm,
+      prompt,
+      outputParser: new StringOutputParser(),
+    });
+    
+    const retrievedDocs = await retriever.getRelevantDocuments(
+      req.body.question,
+    );
+
+    const answer = await ragChain.invoke({
+      question: req.body.question,
+      context: retrievedDocs,
+    });
+    // const answer = await chain.invoke(req.body.question);
+    console.log('Answer:', answer);
+
+    res.status(200).json({ answer });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Internal server error');
+  }
+  
+});
+
+app.listen(port, () => {
+  console.log(`Server running at http://localhost:${port}`);
+});
