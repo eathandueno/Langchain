@@ -9,7 +9,7 @@ const { OpenAIEmbeddings, ChatOpenAI } = require("@langchain/openai");
 const { StringOutputParser } = require("@langchain/core/output_parsers");
 const { PromptTemplate } = require("@langchain/core/prompts");
 const { createStuffDocumentsChain } = require("langchain/chains/combine_documents");
-const { RunnableSequence, RunnablePassthrough } = require("@langchain/core/runnables");
+
 const express = require('express');
 const cors = require('cors');
 const mammoth = require('mammoth');
